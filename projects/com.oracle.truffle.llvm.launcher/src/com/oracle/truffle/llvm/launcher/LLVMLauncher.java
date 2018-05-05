@@ -29,11 +29,20 @@
  */
 package com.oracle.truffle.llvm.launcher;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.Reader;
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
@@ -47,6 +56,8 @@ import org.graalvm.polyglot.PolyglotException;
 import org.graalvm.polyglot.Source;
 import org.graalvm.polyglot.Value;
 
+import jline.internal.InputStreamReader;
+
 public class LLVMLauncher extends AbstractLanguageLauncher {
 
     public static void main(String[] args) {
@@ -56,6 +67,7 @@ public class LLVMLauncher extends AbstractLanguageLauncher {
     boolean printResult = false;
     String[] programArgs;
     File file;
+    ByteBuffer bytes;
     private VersionAction versionAction = VersionAction.None;
 
     @Override
@@ -151,7 +163,12 @@ public class LLVMLauncher extends AbstractLanguageLauncher {
 
         // collect the file:
         if (file == null && iterator.hasNext()) {
-            file = Paths.get(iterator.next()).toFile();
+            String name = iterator.next();
+            if (!name.equals("-")) {
+                file = Paths.get(name).toFile();
+            } else { // read from pipe
+                bytes = readToByteBuffer(System.in);
+            }
         }
 
         // collect the program args:
@@ -161,9 +178,23 @@ public class LLVMLauncher extends AbstractLanguageLauncher {
         return unrecognizedOptions;
     }
 
+    private static ByteBuffer readToByteBuffer(InputStream reader) {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        try {
+            int nRead;
+            byte[] data = new byte[1024];
+            while ((nRead = reader.read(data, 0, data.length)) != -1) {
+                buffer.write(data, 0, nRead);
+            }
+            return ByteBuffer.wrap(buffer.toByteArray());
+        } catch (IOException e) {
+            return ByteBuffer.allocate(0);
+        }
+    }
+
     @Override
     protected void validateArguments(Map<String, String> polyglotOptions) {
-        if (file == null && versionAction != VersionAction.PrintAndExit) {
+        if ((file == null && bytes == null) && versionAction != VersionAction.PrintAndExit) {
             throw abort("No bitcode file provided.", 6);
         }
     }
@@ -207,7 +238,13 @@ public class LLVMLauncher extends AbstractLanguageLauncher {
         contextBuilder.arguments(getLanguageId(), programArgs);
         try (Context context = contextBuilder.build()) {
             runVersionAction(versionAction, context.getEngine());
-            Value library = context.eval(Source.newBuilder(getLanguageId(), file).build());
+            Value library;
+            if (file != null) {
+                library= context.eval(Source.newBuilder(getLanguageId(), file).build(true));
+            }else {
+                Source source = Source.newBuilder(getLanguageId(), bytes, "<stdin>").build();
+                library = context.eval(source);
+            }
             if (!library.canExecute()) {
                 throw abort("no main function found");
             }

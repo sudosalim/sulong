@@ -29,7 +29,10 @@
  */
 package com.oracle.truffle.llvm;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.Reader;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -260,8 +263,11 @@ public final class Runner {
                 bytes = read(filename);
                 library = new ExternalLibrary(Paths.get(filename), null);
             } else if (source.getPath() != null) {
-                bytes = read(source.getPath());
+                bytes = source.getBytes();
                 library = new ExternalLibrary(Paths.get(source.getPath()), null);
+            } else if (source.getBytes() != null) {
+                bytes = source.getBytes();
+                library = new ExternalLibrary(source.getName());
             } else {
                 throw new IllegalStateException();
             }
